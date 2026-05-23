@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ngoni Chiwara</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300;1,400&family=Jost:wght@300;400;500&display=swap" />
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #F9F8F3; }
+  button { cursor: pointer; }
+  textarea, input { font-family: inherit; }
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(25,24,15,0.15); border-radius: 3px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyBktPDpYygQr9C-E3KwfvMb19ltt4j4nZY",
+    authDomain: "ngoni-494d0.firebaseapp.com",
+    projectId: "ngoni-494d0",
+    storageBucket: "ngoni-494d0.firebasestorage.app",
+    messagingSenderId: "369944141250",
+    appId: "1:369944141250:web:6126bd0925edc3dcc68a5b",
+    measurementId: "G-3DSDH83QBG"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db  = getFirestore(app);
+
+  window._fb = {
+    onPosts:  cb => onSnapshot(query(collection(db,"posts"), orderBy("createdAt","desc")), snap => cb(snap.docs.map(d=>({id:d.id,...d.data()})))),
+    onBooks:  cb => onSnapshot(collection(db,"books"), snap => cb(snap.docs.map(d=>({id:d.id,...d.data()})))),
+    onAbout:  cb => onSnapshot(doc(db,"config","about"), snap => { if(snap.exists()) cb(snap.data()); }),
+    savePost:  (id, data) => setDoc(doc(db,"posts",id), data),
+    saveBook:  (id, data) => setDoc(doc(db,"books",id), data),
+    saveAbout: (data)     => setDoc(doc(db,"config","about"), data),
+    deletePost: id => deleteDoc(doc(db,"posts",id)),
+    deleteBook: id => deleteDoc(doc(db,"books",id)),
+  };
+</script>
+
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+const C = {
+  bg: "#F9F8F3", ink: "#19180F", muted: "rgba(25,24,15,0.38)",
+  border: "rgba(25,24,15,0.11)", hover: "rgba(25,24,15,0.02)",
+  poemAccent: "#8B7245", essayAccent: "#4A6158",
+};
+const serif = "'Cormorant Garamond', serif";
+const sans  = "'Jost', sans-serif";
+
+const ADMIN_PASS  = "gallery2025";  // ← change this
+const POSTS_KEY   = "artist-site-posts";
+const BOOKS_KEY   = "artist-site-books";
+const ABOUT_KEY   = "artist-site-about";
+
+// ── Mudcloth pattern (bogolan-inspired geometric tile) ─────────────────────
+const MUDCLOTH_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="60" height="60">
+  <rect x="0" y="27" width="60" height="6" fill="#19180F"/>
+  <rect x="27" y="0" width="6" height="60" fill="#19180F"/>
+  <rect x="3" y="3" width="9" height="9" fill="#19180F"/>
+  <rect x="48" y="3" width="9" height="9" fill="#19180F"/>
+  <rect x="3" y="48" width="9" height="9" fill="#19180F"/>
+  <rect x="48" y="48" width="9" height="9" fill="#19180F"/>
+  <rect x="27" y="27" width="6" height="6" fill="#F9F8F3"/>
+  <rect x="15" y="15" width="4" height="4" fill="#19180F"/>
+  <rect x="41" y="15" width="4" height="4" fill="#19180F"/>
+  <rect x="15" y="41" width="4" height="4" fill="#19180F"/>
+  <rect x="41" y="41" width="4" height="4" fill="#19180F"/>
+</svg>`;
+
+const DEFAULT_ABOUT = {
+  intro: "I write poems and essays about attention, time, and what happens when looking becomes a practice rather than a reflex.",
+  bio: "My work has appeared in various journals and anthologies. I live and write in London.",
+  bio2: "This site is a place to share ongoing work—published and unpublished, finished and not quite. I add to it slowly, which is how I prefer most things.",
+};
+
+// ── Storage ────────────────────────────────────────────────────────────────
+function loadKey(key) {
+  try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : null; } catch { return null; }
+}
+function saveKey(key, val) {
+  try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
+}
+function fb() { return window._fb; }
+function fbReady() { return !!window._fb; }
+
+// ── Export / Import ────────────────────────────────────────────────────────
+function exportData(posts, books, about) {
+  const data = { version: 1, exportedAt: new Date().toISOString(), posts, books, about };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href = url; a.download = "ngoni-site-backup.json"; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function importData(file, onDone) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!data.posts || !data.books) { alert("Invalid backup file."); return; }
+      onDone(data.posts, data.books, data.about || DEFAULT_ABOUT);
+    } catch { alert("Could not read file — make sure it's a valid backup."); }
+  };
+  reader.readAsText(file);
+}
+
+// ── Image compression ──────────────────────────────────────────────────────
+async function compress(file) {
+  return new Promise(resolve => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        const max = 1000;
+        const r = Math.min(1, max / Math.max(img.width, img.height));
+        const c = document.createElement("canvas");
+        c.width = Math.round(img.width * r); c.height = Math.round(img.height * r);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        resolve(c.toDataURL("image/jpeg", 0.76));
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// ── Shared UI ──────────────────────────────────────────────────────────────
+function Badge({ type }) {
+  const color = type === "poem" ? C.poemAccent : C.essayAccent;
+  return <span style={{ fontFamily: sans, fontSize: "0.6rem", letterSpacing: "0.22em", textTransform: "uppercase", color, border: `0.5px solid ${color}`, padding: "3px 9px", borderRadius: "2px" }}>{type}</span>;
+}
+function Muted({ children, style = {} }) {
+  return <span style={{ fontFamily: sans, fontSize: "0.72rem", color: C.muted, ...style }}>{children}</span>;
+}
+function Lbl({ children }) {
+  return <label style={{ fontFamily: sans, fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase", color: C.muted, display: "block", marginBottom: "0.5rem" }}>{children}</label>;
+}
+function Inp({ value, onChange, placeholder, style = {} }) {
+  return <input value={value} onChange={onChange} placeholder={placeholder} style={{ width: "100%", background: "transparent", border: "none", borderBottom: `0.5px solid ${C.border}`, padding: "0.5rem 0", fontFamily: serif, fontSize: "1.1rem", color: C.ink, outline: "none", ...style }} />;
+}
+function Txa({ value, onChange, placeholder, rows = 8 }) {
+  return <textarea value={value} onChange={onChange} placeholder={placeholder} rows={rows} style={{ width: "100%", background: "transparent", border: `0.5px solid ${C.border}`, padding: "0.75rem", fontFamily: serif, fontSize: "1rem", color: C.ink, outline: "none", resize: "vertical", lineHeight: 1.7 }} />;
+}
+function Btn({ onClick, children, subtle = false, danger = false, style = {} }) {
+  const color = danger ? C.poemAccent : C.ink;
+  return (
+    <button onClick={onClick} style={{ fontFamily: sans, fontSize: "0.62rem", letterSpacing: "0.2em", textTransform: "uppercase", color, opacity: subtle ? 0.4 : 0.85, background: "none", border: subtle ? "none" : `0.5px solid ${color}`, padding: subtle ? "0" : "0.55rem 1.4rem", ...style }}>
+      {children}
+    </button>
+  );
+}
+
+// ── Nav ────────────────────────────────────────────────────────────────────
+function Nav({ view, setView }) {
+  return (
+    <nav style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "2rem 3rem", borderBottom: `0.5px solid ${C.border}` }}>
+      <button onClick={() => setView("home")} style={{ fontFamily: serif, fontSize: "1.35rem", fontWeight: 300, color: C.ink, background: "none", border: "none", letterSpacing: "0.04em" }}>
+        Ngoni Chiwara
+      </button>
+      <div style={{ display: "flex", gap: "2.5rem", alignItems: "center" }}>
+        {[["Writing", "home"], ["Archive", "archive"], ["About", "about"]].map(([label, key]) => (
+          <button key={key} onClick={() => setView(key)} style={{ fontFamily: sans, fontSize: "0.65rem", letterSpacing: "0.2em", textTransform: "uppercase", color: C.ink, opacity: view === key ? 1 : 0.38, background: "none", border: "none" }}>
+            {label}
+          </button>
+        ))}
+      </div>
+    </nav>
+  );
+}
+
+// ── Footer ─────────────────────────────────────────────────────────────────
+function Footer({ setView }) {
+  return (
+    <footer style={{ borderTop: `0.5px solid ${C.border}`, padding: "2.5rem 3rem", display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "6rem" }}>
+      <Muted>© Ngoni Chiwara</Muted>
+      <button onClick={() => setView("admin")} style={{ fontFamily: sans, fontSize: "0.55rem", letterSpacing: "0.18em", textTransform: "uppercase", color: C.muted, background: "none", border: "none", opacity: 0.5 }}>Admin</button>
+    </footer>
+  );
+}
+
+// ── PostCard ───────────────────────────────────────────────────────────────
+function PostCard({ post, onClick }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <div onClick={onClick} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{ cursor: "pointer", padding: "2.5rem 0", borderBottom: `0.5px solid ${C.border}`, background: hov ? C.hover : "transparent", transition: "background 0.2s" }}>
+      {post.image && (
+        <img src={post.image} alt="" style={{ width: "100%", maxHeight: "280px", objectFit: "cover", marginBottom: "1.5rem", display: "block" }} />
+      )}
+      <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginBottom: "0.85rem" }}>
+        <Badge type={post.type} />
+        <Muted>{post.date}</Muted>
+      </div>
+      <h2 style={{ fontFamily: serif, fontSize: "1.75rem", fontWeight: 300, color: C.ink, marginBottom: "0.75rem", lineHeight: 1.25 }}>{post.title}</h2>
+      <p style={{ fontFamily: serif, fontSize: "1rem", color: C.ink, opacity: 0.65, lineHeight: 1.7, fontStyle: "italic" }}>{post.excerpt}</p>
+    </div>
+  );
+}
+
+// ── Home ───────────────────────────────────────────────────────────────────
+function Home({ posts, openPost, setView }) {
+  const recent = posts.slice(0, 5);
+  return (
+    <main style={{ maxWidth: "720px", margin: "0 auto", padding: "4rem 2rem 0" }}>
+      <header style={{ marginBottom: "4rem", paddingBottom: "3rem", borderBottom: `0.5px solid ${C.border}` }}>
+        <p style={{ fontFamily: serif, fontSize: "1.15rem", color: C.ink, opacity: 0.6, lineHeight: 1.8, fontStyle: "italic", maxWidth: "520px" }}>
+          Poems and essays on attention, time, and the practice of looking.
+        </p>
+      </header>
+      {recent.length === 0 ? (
+        <p style={{ fontFamily: serif, fontSize: "1.1rem", color: C.ink, opacity: 0.35, fontStyle: "italic" }}>No posts yet.</p>
+      ) : (
+        recent.map(p => <PostCard key={p.id} post={p} onClick={() => openPost(p)} />)
+      )}
+      {posts.length > 5 && (
+        <div style={{ paddingTop: "2.5rem" }}>
+          <Btn onClick={() => setView("archive")}>View all writing</Btn>
+        </div>
+      )}
+    </main>
+  );
+}
+
+// ── Archive ────────────────────────────────────────────────────────────────
+function Archive({ posts, openPost }) {
+  const [filter, setFilter] = useState("all");
+  const filtered = filter === "all" ? posts : posts.filter(p => p.type === filter);
+  return (
+    <main style={{ maxWidth: "720px", margin: "0 auto", padding: "4rem 2rem 0" }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: "3rem" }}>
+        <h1 style={{ fontFamily: serif, fontSize: "2rem", fontWeight: 300, color: C.ink }}>Archive</h1>
+        <div style={{ display: "flex", gap: "1.5rem" }}>
+          {[["All", "all"], ["Poems", "poem"], ["Essays", "essay"]].map(([label, key]) => (
+            <button key={key} onClick={() => setFilter(key)} style={{ fontFamily: sans, fontSize: "0.62rem", letterSpacing: "0.18em", textTransform: "uppercase", color: C.ink, opacity: filter === key ? 1 : 0.35, background: "none", border: "none" }}>{label}</button>
+          ))}
+        </div>
+      </div>
+      {filtered.length === 0 ? (
+        <p style={{ fontFamily: serif, fontSize: "1.1rem", color: C.ink, opacity: 0.35, fontStyle: "italic" }}>Nothing here yet.</p>
+      ) : (
+        filtered.map(p => <PostCard key={p.id} post={p} onClick={() => openPost(p)} />)
+      )}
+    </main>
+  );
+}
+
+// ── PostView ───────────────────────────────────────────────────────────────
+function PostView({ post, setView }) {
+  if (!post) return null;
+  const isPoem = post.type === "poem";
+  return (
+    <main style={{ maxWidth: "620px", margin: "0 auto", padding: "4rem 2rem 0" }}>
+      <button onClick={() => setView("home")} style={{ fontFamily: sans, fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase", color: C.muted, background: "none", border: "none", marginBottom: "3rem", display: "block" }}>← Back</button>
+      <div style={{ marginBottom: "1.25rem", display: "flex", alignItems: "center", gap: "1rem" }}>
+        <Badge type={post.type} />
+        <Muted>{post.date}</Muted>
+      </div>
+      <h1 style={{ fontFamily: serif, fontSize: "2.2rem", fontWeight: 300, color: C.ink, marginBottom: "2.5rem", lineHeight: 1.2 }}>{post.title}</h1>
+      {post.image && <img src={post.image} alt="" style={{ width: "100%", marginBottom: "2.5rem", display: "block" }} />}
+      {isPoem ? (
+        <pre style={{ fontFamily: serif, fontSize: "1.1rem", color: C.ink, lineHeight: 1.85, whiteSpace: "pre-wrap", fontWeight: 300 }}>{post.content}</pre>
+      ) : (
+        <div style={{ fontFamily: serif, fontSize: "1.05rem", color: C.ink, lineHeight: 1.85 }}>
+          {post.content.split("\n\n").map((para, i) => (
+            <p key={i} style={{ marginBottom: "1.5rem" }}>{para}</p>
+          ))}
+        </div>
+      )}
+    </main>
+  );
+}
+
+// ── About ──────────────────────────────────────────────────────────────────
+function About({ books, about }) {
+  return (
+    <main style={{ maxWidth: "720px", margin: "0 auto", padding: "4rem 2rem 0" }}>
+      <div style={{ maxWidth: "520px", marginBottom: "5rem" }}>
+        <p style={{ fontFamily: serif, fontSize: "1.25rem", color: C.ink, lineHeight: 1.8, fontStyle: "italic", marginBottom: "2rem", fontWeight: 300 }}>{about.intro}</p>
+        <p style={{ fontFamily: serif, fontSize: "1rem", color: C.ink, opacity: 0.72, lineHeight: 1.8, marginBottom: "1rem" }}>{about.bio}</p>
+        {about.bio2 && <p style={{ fontFamily: serif, fontSize: "1rem", color: C.ink, opacity: 0.72, lineHeight: 1.8 }}>{about.bio2}</p>}
+      </div>
+      {books.length > 0 && (
+        <section>
+          <h2 style={{ fontFamily: sans, fontSize: "0.62rem", letterSpacing: "0.22em", textTransform: "uppercase", color: C.muted, marginBottom: "2.5rem" }}>Books</h2>
+          <div style={{ display: "grid", gap: "2.5rem" }}>
+            {books.map(book => (
+              <div key={book.id} style={{ display: "flex", gap: "2rem", alignItems: "flex-start" }}>
+                {book.image && <img src={book.image} alt={book.title} style={{ width: "90px", flexShrink: 0, display: "block" }} />}
+                <div>
+                  <h3 style={{ fontFamily: serif, fontSize: "1.3rem", fontWeight: 300, color: C.ink, marginBottom: "0.35rem" }}>{book.title}</h3>
+                  <Muted style={{ display: "block", marginBottom: "0.6rem" }}>{book.date}</Muted>
+                  {book.description && <p style={{ fontFamily: serif, fontSize: "0.95rem", color: C.ink, opacity: 0.65, lineHeight: 1.7 }}>{book.description}</p>}
+                  {book.link && <a href={book.link} target="_blank" rel="noreferrer" style={{ fontFamily: sans, fontSize: "0.6rem", letterSpacing: "0.18em", textTransform: "uppercase", color: C.essayAccent, textDecoration: "none", display: "inline-block", marginTop: "0.75rem" }}>Buy / Info →</a>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+    </main>
+  );
+}
+
+// ── PostForm ───────────────────────────────────────────────────────────────
+function PostForm({ initial, onSave, onCancel }) {
+  const [form, setForm] = useState(initial || { type: "poem", title: "", date: "", excerpt: "", content: "", image: null });
+  const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+  const handleImage = async e => {
+    const file = e.target.files[0];
+    if (file) { const img = await compress(file); setForm(f => ({ ...f, image: img })); }
+  };
+  return (
+    <div style={{ display: "grid", gap: "1.75rem" }}>
+      <div>
+        <Lbl>Type</Lbl>
+        <div style={{ display: "flex", gap: "1.5rem" }}>
+          {["poem", "essay"].map(t => (
+            <label key={t} style={{ fontFamily: sans, fontSize: "0.68rem", letterSpacing: "0.15em", textTransform: "uppercase", color: C.ink, opacity: form.type === t ? 1 : 0.35, cursor: "pointer", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <input type="radio" name="type" value={t} checked={form.type === t} onChange={set("type")} style={{ accentColor: C.ink }} /> {t}
+            </label>
+          ))}
+        </div>
+      </div>
+      <div><Lbl>Title</Lbl><Inp value={form.title} onChange={set("title")} placeholder="Title" /></div>
+      <div><Lbl>Date</Lbl><Inp value={form.date} onChange={set("date")} placeholder="e.g. April 2025" /></div>
+      <div><Lbl>Excerpt</Lbl><Txa value={form.excerpt} onChange={set("excerpt")} placeholder="Opening line or short excerpt shown on cards…" rows={3} /></div>
+      <div><Lbl>Content</Lbl><Txa value={form.content} onChange={set("content")} placeholder="Full text…" rows={14} /></div>
+      <div>
+        <Lbl>Image (optional)</Lbl>
+        <input type="file" accept="image/*" onChange={handleImage} style={{ fontFamily: sans, fontSize: "0.7rem", color: C.muted }} />
+        {form.image && <img src={form.image} alt="" style={{ marginTop: "0.75rem", maxHeight: "140px", display: "block" }} />}
+        {form.image && <button onClick={() => setForm(f => ({ ...f, image: null }))} style={{ fontFamily: sans, fontSize: "0.58rem", letterSpacing: "0.15em", textTransform: "uppercase", color: C.poemAccent, background: "none", border: "none", marginTop: "0.4rem" }}>Remove image</button>}
+      </div>
+      <div style={{ display: "flex", gap: "1.25rem", paddingTop: "0.5rem" }}>
+        <Btn onClick={() => { if (form.title && form.content) onSave(form); else alert("Title and content are required."); }}>Save</Btn>
+        <Btn onClick={onCancel} subtle>Cancel</Btn>
+      </div>
+    </div>
+  );
+}
+
+// ── BookForm ───────────────────────────────────────────────────────────────
+function BookForm({ initial, onSave, onCancel }) {
+  const [form, setForm] = useState(initial || { title: "", date: "", description: "", link: "", image: null });
+  const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+  const handleImage = async e => {
+    const file = e.target.files[0];
+    if (file) { const img = await compress(file); setForm(f => ({ ...f, image: img })); }
+  };
+  return (
+    <div style={{ display: "grid", gap: "1.75rem" }}>
+      <div><Lbl>Title</Lbl><Inp value={form.title} onChange={set("title")} placeholder="Book title" /></div>
+      <div><Lbl>Date / Year</Lbl><Inp value={form.date} onChange={set("date")} placeholder="e.g. 2023" /></div>
+      <div><Lbl>Description</Lbl><Txa value={form.description} onChange={set("description")} placeholder="Short description…" rows={4} /></div>
+      <div><Lbl>Link (optional)</Lbl><Inp value={form.link} onChange={set("link")} placeholder="https://…" /></div>
+      <div>
+        <Lbl>Cover image (optional)</Lbl>
+        <input type="file" accept="image/*" onChange={handleImage} style={{ fontFamily: sans, fontSize: "0.7rem", color: C.muted }} />
+        {form.image && <img src={form.image} alt="" style={{ marginTop: "0.75rem", maxHeight: "140px", display: "block" }} />}
+        {form.image && <button onClick={() => setForm(f => ({ ...f, image: null }))} style={{ fontFamily: sans, fontSize: "0.58rem", letterSpacing: "0.15em", textTransform: "uppercase", color: C.poemAccent, background: "none", border: "none", marginTop: "0.4rem" }}>Remove image</button>}
+      </div>
+      <div style={{ display: "flex", gap: "1.25rem", paddingTop: "0.5rem" }}>
+        <Btn onClick={() => { if (form.title) onSave(form); else alert("Title is required."); }}>Save</Btn>
+        <Btn onClick={onCancel} subtle>Cancel</Btn>
+      </div>
+    </div>
+  );
+}
+
+// ── AboutForm ──────────────────────────────────────────────────────────────
+function AboutForm({ about, onSave }) {
+  const [form, setForm] = useState(about);
+  const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+  useEffect(() => { setForm(about); }, [about]);
+  return (
+    <div style={{ display: "grid", gap: "1.75rem", maxWidth: "580px" }}>
+      <div><Lbl>Intro (italic, larger)</Lbl><Txa value={form.intro} onChange={set("intro")} rows={3} /></div>
+      <div><Lbl>Bio paragraph 1</Lbl><Txa value={form.bio} onChange={set("bio")} rows={3} /></div>
+      <div><Lbl>Bio paragraph 2 (optional)</Lbl><Txa value={form.bio2 || ""} onChange={set("bio2")} rows={3} /></div>
+      <div><Btn onClick={() => onSave(form)}>Save about</Btn></div>
+    </div>
+  );
+}
+
+// ── AdminLogin ─────────────────────────────────────────────────────────────
+function AdminLogin({ onAuth, onBack }) {
+  const [pass, setPass] = useState("");
+  const [err, setErr]   = useState(false);
+  const attempt = () => { if (pass === ADMIN_PASS) onAuth(); else setErr(true); };
+  return (
+    <div style={{ maxWidth: "380px", margin: "8rem auto", padding: "0 2rem" }}>
+      <button onClick={onBack} style={{ fontFamily: sans, fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase", color: C.muted, background: "none", border: "none", marginBottom: "2.5rem", display: "block" }}>← Back</button>
+      <h2 style={{ fontFamily: serif, fontSize: "1.6rem", fontWeight: 300, color: C.ink, marginBottom: "2rem" }}>Admin</h2>
+      <Lbl>Password</Lbl>
+      <input type="password" value={pass} onChange={e => { setPass(e.target.value); setErr(false); }}
+        onKeyDown={e => e.key === "Enter" && attempt()}
+        style={{ width: "100%", background: "transparent", border: "none", borderBottom: `0.5px solid ${err ? C.poemAccent : C.border}`, padding: "0.5rem 0", fontFamily: serif, fontSize: "1.1rem", color: C.ink, outline: "none", marginBottom: "1.5rem" }} />
+      {err && <p style={{ fontFamily: sans, fontSize: "0.68rem", color: C.poemAccent, marginBottom: "1rem" }}>Incorrect password.</p>}
+      <Btn onClick={attempt}>Enter</Btn>
+    </div>
+  );
+}
+
+// ── AdminPanel ─────────────────────────────────────────────────────────────
+function AdminPanel({ posts, books, about, onSavePost, onDeletePost, onSaveBook, onDeleteBook, onSaveAbout, onExport, onImport, onBack }) {
+  const [tab, setTab]       = useState("posts");
+  const [screen, setScreen] = useState("list"); // "list" | "new" | "edit"
+  const [editItem, setEditItem] = useState(null);
+  const importRef = useRef();
+
+  const startEdit = item => { setEditItem(item); setScreen("edit"); };
+  const startNew  = ()   => { setEditItem(null);  setScreen("new");  };
+
+  const handleSavePost = (form) => {
+    onSavePost(form, editItem ? editItem.id : null);
+    setScreen("list"); setEditItem(null);
+  };
+  const handleSaveBook = (form) => {
+    onSaveBook(form, editItem ? editItem.id : null);
+    setScreen("list"); setEditItem(null);
+  };
+
+  if (screen === "new" || screen === "edit") {
+    return (
+      <div style={{ maxWidth: "680px", margin: "0 auto", padding: "3.5rem 2rem" }}>
+        <button onClick={() => { setScreen("list"); setEditItem(null); }} style={{ fontFamily: sans, fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase", color: C.muted, background: "none", border: "none", marginBottom: "2.5rem", display: "block" }}>← Back to list</button>
+        <h2 style={{ fontFamily: serif, fontSize: "1.6rem", fontWeight: 300, color: C.ink, marginBottom: "2.5rem" }}>
+          {screen === "edit" ? "Edit" : "New"} {tab === "posts" ? "post" : "book"}
+        </h2>
+        {tab === "posts"
+          ? <PostForm initial={editItem} onSave={handleSavePost} onCancel={() => { setScreen("list"); setEditItem(null); }} />
+          : <BookForm initial={editItem} onSave={handleSaveBook} onCancel={() => { setScreen("list"); setEditItem(null); }} />
+        }
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ maxWidth: "720px", margin: "0 auto", padding: "3.5rem 2rem" }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "3rem" }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: "1.5rem" }}>
+          <button onClick={onBack} style={{ fontFamily: sans, fontSize: "0.6rem", letterSpacing: "0.2em", textTransform: "uppercase", color: C.muted, background: "none", border: "none" }}>← Back</button>
+          <h2 style={{ fontFamily: serif, fontSize: "1.6rem", fontWeight: 300, color: C.ink }}>Admin</h2>
+        </div>
+        <div style={{ display: "flex", gap: "1.25rem", alignItems: "center" }}>
+          {tab !== "about" && (
+            <Btn onClick={startNew}>+ New {tab === "posts" ? "post" : "book"}</Btn>
+          )}
+          <Btn onClick={onExport} subtle>Export backup</Btn>
+          <input ref={importRef} type="file" accept=".json" style={{ display: "none" }}
+            onChange={e => { if (e.target.files[0]) { onImport(e.target.files[0]); e.target.value = ""; } }} />
+          <Btn onClick={() => importRef.current.click()} subtle>Import backup</Btn>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: "2rem", marginBottom: "2.5rem", borderBottom: `0.5px solid ${C.border}`, paddingBottom: "1rem" }}>
+        {[["Writing", "posts"], ["Books", "books"], ["About page", "about"]].map(([label, key]) => (
+          <button key={key} onClick={() => { setTab(key); setScreen("list"); }} style={{ fontFamily: sans, fontSize: "0.68rem", letterSpacing: "0.2em", textTransform: "uppercase", color: C.ink, opacity: tab === key ? 1 : 0.35, fontWeight: tab === key ? 500 : 400, background: "none", border: "none", padding: "0 0 6px", borderBottom: tab === key ? `1.5px solid ${C.ink}` : "1.5px solid transparent" }}>{label}</button>
+        ))}
+      </div>
+
+      {/* Posts list */}
+      {tab === "posts" && (
+        posts.length === 0
+          ? <p style={{ fontFamily: serif, fontSize: "1.1rem", color: C.ink, opacity: 0.35, fontStyle: "italic" }}>No posts yet.</p>
+          : posts.map(post => (
+            <div key={post.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "1.2rem 0", borderBottom: `0.5px solid ${C.border}`, gap: "2rem" }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: "1.25rem", flex: 1, minWidth: 0 }}>
+                <span style={{ fontFamily: serif, fontSize: "1.2rem", color: C.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{post.title}</span>
+                <Badge type={post.type} />
+                {post.image && <span style={{ fontFamily: sans, fontSize: "0.58rem", letterSpacing: "0.12em", color: C.muted }}>img</span>}
+              </div>
+              <div style={{ display: "flex", gap: "1.5rem", flexShrink: 0, alignItems: "center" }}>
+                <Muted>{post.date}</Muted>
+                <button onClick={() => startEdit(post)} style={{ fontFamily: sans, fontSize: "0.63rem", letterSpacing: "0.15em", textTransform: "uppercase", color: C.ink, opacity: 0.4, background: "none", border: "none", padding: 0 }}>Edit</button>
+                <button onClick={() => { if (confirm("Delete this post?")) onDeletePost(post.id); }} style={{ fontFamily: sans, fontSize: "0.63rem", letterSpacing: "0.15em", textTransform: "uppercase", color: C.poemAccent, opacity: 0.55, background: "none", border: "none", padding: 0 }}>Delete</button>
+              </div>
+            </div>
+          ))
+      )}
+
+      {/* Books list */}
+      {tab === "books" && (
+        books.length === 0
+          ? <p style={{ fontFamily: serif, fontSize: "1.1rem", color: C.ink, opacity: 0.35, fontStyle: "italic" }}>No books yet.</p>
+          : books.map(book => (
+            <div key={book.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "1.2rem 0", borderBottom: `0.5px solid ${C.border}`, gap: "2rem" }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: "1.25rem", flex: 1, minWidth: 0 }}>
+                <span style={{ fontFamily: serif, fontSize: "1.2rem", color: C.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{book.title}</span>
+                {book.image && <span style={{ fontFamily: sans, fontSize: "0.58rem", letterSpacing: "0.12em", color: C.muted }}>img</span>}
+              </div>
+              <div style={{ display: "flex", gap: "1.5rem", flexShrink: 0, alignItems: "center" }}>
+                <Muted>{book.date}</Muted>
+                <button onClick={() => startEdit(book)} style={{ fontFamily: sans, fontSize: "0.63rem", letterSpacing: "0.15em", textTransform: "uppercase", color: C.ink, opacity: 0.4, background: "none", border: "none", padding: 0 }}>Edit</button>
+                <button onClick={() => { if (confirm("Delete this book?")) onDeleteBook(book.id); }} style={{ fontFamily: sans, fontSize: "0.63rem", letterSpacing: "0.15em", textTransform: "uppercase", color: C.poemAccent, opacity: 0.55, background: "none", border: "none", padding: 0 }}>Delete</button>
+              </div>
+            </div>
+          ))
+      )}
+
+      {/* About editor */}
+      {tab === "about" && <AboutForm about={about} onSave={onSaveAbout} />}
+    </div>
+  );
+}
+
+// ── App ────────────────────────────────────────────────────────────────────
+function App() {
+  const [posts, setPosts]     = useState([]);
+  const [books, setBooks]     = useState([]);
+  const [about, setAbout]     = useState(DEFAULT_ABOUT);
+  const [view, setView]       = useState("home");
+  const [post, setPost]       = useState(null);
+  const [adminAuth, setAdminAuth] = useState(false);
+  const [ready, setReady]     = useState(false);
+
+  // Wait for Firebase module to load then subscribe to real-time data
+  useEffect(() => {
+    let tries = 0;
+    const iv = setInterval(() => {
+      if (fbReady()) {
+        clearInterval(iv);
+        console.log("Firebase ready!");
+        setReady(true);
+      } else if (++tries > 100) {
+        clearInterval(iv);
+        console.warn("Firebase not available after 10s, falling back to localStorage");
+        const p = loadKey(POSTS_KEY); setPosts(p && p.length > 0 ? p : SEED_POSTS);
+        const b = loadKey(BOOKS_KEY); if (b) setBooks(b);
+        const a = loadKey(ABOUT_KEY); if (a) setAbout(a);
+        setReady(true);
+      }
+    }, 100);
+    return () => clearInterval(iv);
+  }, []);
+
+  useEffect(() => {
+    if (!ready || !fbReady()) return;
+    const unsubP = fb().onPosts(data => {
+      if (data.length === 0) {
+        SEED_POSTS.forEach(p => fb().savePost(p.id, { ...p, createdAt: Date.now() }));
+      } else { setPosts(data); }
+    });
+    const unsubB = fb().onBooks(data => setBooks(data));
+    const unsubA = fb().onAbout(data => setAbout(data));
+    return () => { unsubP(); unsubB(); unsubA(); };
+  }, [ready]);
+
+  // Mudcloth background pattern
+  useEffect(() => {
+    const encoded = encodeURIComponent(MUDCLOTH_SVG);
+    const style = document.createElement("style");
+    style.textContent = `
+      body::before {
+        content: '';
+        position: fixed;
+        inset: 0;
+        background-image: url("data:image/svg+xml,${encoded}");
+        background-repeat: repeat;
+        background-size: 60px 60px;
+        opacity: 0.032;
+        pointer-events: none;
+        z-index: 0;
+      }
+      #root { position: relative; z-index: 1; }
+    `;
+    document.head.appendChild(style);
+    return () => document.head.removeChild(style);
+  }, []);
+
+  const handleSavePost = async (form, editId) => {
+    const id = editId || `p-${Date.now()}`;
+    const createdAt = editId ? (posts.find(p=>p.id===editId)?.createdAt || Date.now()) : Date.now();
+    if (fbReady()) await fb().savePost(id, { ...form, id, createdAt });
+    else { const u = editId ? posts.map(p=>p.id===editId?{...form,id}:p) : [{...form,id},...posts]; setPosts(u); saveKey(POSTS_KEY,u); }
+  };
+  const handleDeletePost = async id => {
+    if (fbReady()) await fb().deletePost(id);
+    else { const u = posts.filter(p=>p.id!==id); setPosts(u); saveKey(POSTS_KEY,u); }
+  };
+  const handleSaveBook = async (form, editId) => {
+    const id = editId || `b-${Date.now()}`;
+    if (fbReady()) await fb().saveBook(id, { ...form, id });
+    else { const u = editId ? books.map(b=>b.id===editId?{...form,id}:b) : [...books,{...form,id}]; setBooks(u); saveKey(BOOKS_KEY,u); }
+  };
+  const handleDeleteBook = async id => {
+    if (fbReady()) await fb().deleteBook(id);
+    else { const u = books.filter(b=>b.id!==id); setBooks(u); saveKey(BOOKS_KEY,u); }
+  };
+  const handleSaveAbout = async a => {
+    if (fbReady()) await fb().saveAbout(a);
+    else { setAbout(a); saveKey(ABOUT_KEY,a); }
+  };
+
+  const handleExport = () => exportData(posts, books, about);
+  const handleImport = file => {
+    importData(file, async (p, b, a) => {
+      if (fbReady()) {
+        await Promise.all(p.map(x => fb().savePost(x.id, x)));
+        await Promise.all(b.map(x => fb().saveBook(x.id, x)));
+        await fb().saveAbout(a);
+      } else {
+        setPosts(p); setBooks(b); setAbout(a);
+        saveKey(POSTS_KEY,p); saveKey(BOOKS_KEY,b); saveKey(ABOUT_KEY,a);
+      }
+      alert("Import successful!");
+    });
+  };
+
+  const openPost = p => { setPost(p); setView("post"); };
+  const nav = v => { setView(v); if (v !== "post") setPost(null); };
+  const isAdmin = view === "admin";
+
+  return (
+    <div style={{ background: C.bg, minHeight: "100vh", color: C.ink }}>
+      {!isAdmin && <Nav view={view} setView={nav} />}
+      {isAdmin && !adminAuth && <AdminLogin onAuth={() => setAdminAuth(true)} onBack={() => nav("home")} />}
+      {isAdmin &&  adminAuth && <AdminPanel posts={posts} books={books} about={about} onSavePost={handleSavePost} onDeletePost={handleDeletePost} onSaveBook={handleSaveBook} onDeleteBook={handleDeleteBook} onSaveAbout={handleSaveAbout} onExport={handleExport} onImport={handleImport} onBack={() => nav("home")} />}
+      {!isAdmin && view === "home"    && <Home posts={posts} openPost={openPost} setView={nav} />}
+      {!isAdmin && view === "archive" && <Archive posts={posts} openPost={openPost} />}
+      {!isAdmin && view === "post"    && <PostView post={post} setView={nav} />}
+      {!isAdmin && view === "about"   && <About books={books} about={about} />}
+      {!isAdmin && <Footer setView={nav} />}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
